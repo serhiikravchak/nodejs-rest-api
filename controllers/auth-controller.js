@@ -3,7 +3,13 @@ const { HttpError } = require("../helpers");
 const { ctrlWrapper } = require("../decorators");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const gravatar = require("gravatar");
+const path = require("path");
+const fs = require("fs/promises");
+const Jimp = require("jimp");
+const { PORT } = process.env;
 
+const avatarsDir = path.join(__dirname, "../", "public", "avatars");
 const { SECRET_KEY } = process.env;
 
 const register = async (req, res) => {
@@ -12,12 +18,18 @@ const register = async (req, res) => {
   if (user) {
     throw HttpError(409, "Email in use");
   }
-
   const hashPassword = await bcrypt.hash(password, 10);
-  const newUser = await User.create({ ...req.body, password: hashPassword });
+  const avatarURL = gravatar.url(email);
+
+  const newUser = await User.create({
+    ...req.body,
+    password: hashPassword,
+    avatarURL,
+  });
   res.status(201).json({
     email: newUser.email,
     subscription: newUser.subscription,
+    avatarURL: newUser.avatarURL,
   });
 };
 
@@ -57,26 +69,46 @@ const current = async (req, res) => {
 };
 
 const logout = async (req, res) => {
- const {_id}= req.user;
-const user = await User.findByIdAndUpdate(_id, { token: null });
-if(!user){
+  const { _id } = req.user;
+  const user = await User.findByIdAndUpdate(_id, { token: null });
+  if (!user) {
     throw HttpError(401);
-}
-res.status(204).json()
-}
+  }
+  res.status(204).json();
+};
 
 const update = async (req, res) => {
- const {_id}= req.user;
- const {subscription} = req.body;
- 
- const updatedUser = await User.findByIdAndUpdate({_id}, { subscription }, { new: true });
+  const { _id } = req.user;
+  const { subscription } = req.body;
 
- if(!updatedUser){
+  const updatedUser = await User.findByIdAndUpdate(
+    { _id },
+    { subscription },
+    { new: true }
+  );
+
+  if (!updatedUser) {
     throw HttpError(401);
- }
+  }
 
- res.status(200).json(updatedUser);
-}
+  res.status(200).json(updatedUser);
+};
+
+const updateAvatar = async (req, res) => {
+  const { _id } = req.user;
+  const { path: tempUpload, originalname } = req.file;
+  const imageName = `${_id}_${originalname}`;
+
+  const image = await Jimp.read(tempUpload);
+  await image.resize(250, 250).write(tempUpload);
+
+  const resultUpload = path.join(avatarsDir, imageName);
+  await fs.rename(tempUpload, resultUpload);
+  const avatarURL = `http://localhost:${PORT}/avatars/${imageName}`;
+  await User.findByIdAndUpdate(_id, { avatarURL });
+
+  res.status(200).json({ avatarURL });
+};
 
 module.exports = {
   register: ctrlWrapper(register),
@@ -84,4 +116,5 @@ module.exports = {
   current: ctrlWrapper(current),
   logout: ctrlWrapper(logout),
   update: ctrlWrapper(update),
+  updateAvatar: ctrlWrapper(updateAvatar),
 };
